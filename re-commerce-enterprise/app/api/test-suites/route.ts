@@ -1,101 +1,56 @@
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-config';
 import { prisma } from '@/lib/db';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const testSuites = await prisma.testSuite.findMany({
-      where: {
-        tenantId: 'default-tenant' // TODO: Get from session
-      },
-      include: {
-        executions: {
-          orderBy: { startTime: 'desc' },
-          take: 5
-        }
-      },
-      orderBy: { createdAt: 'desc' }
-    });
-
-    // Generate mock data if no data exists
-    if (testSuites.length === 0) {
-      const mockSuites = [
-        {
-          id: 'suite1',
-          name: 'Unit Tests',
-          description: 'Core functionality unit tests',
-          type: 'unit',
-          framework: 'jest',
-          isActive: true,
-          executions: [
-            { status: 'passed', duration: 45000, coverage: 87.5 },
-            { status: 'failed', duration: 52000, coverage: 85.2 }
-          ]
-        },
-        {
-          id: 'suite2',
-          name: 'Integration Tests',
-          description: 'API and database integration tests',
-          type: 'integration',
-          framework: 'cypress',
-          isActive: true,
-          executions: [
-            { status: 'passed', duration: 125000, coverage: 92.1 }
-          ]
-        },
-        {
-          id: 'suite3',
-          name: 'E2E Tests',
-          description: 'End-to-end user journey tests',
-          type: 'e2e',
-          framework: 'playwright',
-          isActive: true,
-          executions: [
-            { status: 'running', duration: null, coverage: null }
-          ]
-        },
-        {
-          id: 'suite4',
-          name: 'Performance Tests',
-          description: 'Load and stress testing',
-          type: 'performance',
-          framework: 'k6',
-          isActive: true,
-          executions: [
-            { status: 'passed', duration: 180000, coverage: null }
-          ]
-        }
-      ];
-
-      return NextResponse.json({
-        success: true,
-        data: mockSuites
-      });
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // Use IntegrationTest model for test suites
+    const testSuites = await prisma.integrationTest.findMany({
+      where: {
+        type: 'test_suite'
+      },
+      take: 50,
+      orderBy: { executedAt: 'desc' }
+    });
 
     return NextResponse.json({
       success: true,
       data: testSuites
     });
   } catch (error) {
-    console.error('Test suites API error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch test suites' },
-      { status: 500 }
-    );
+    console.error('Test suites error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
-    
-    const testSuite = await prisma.testSuite.create({
+
+    // Create test suite as integration test
+    const testSuite = await prisma.integrationTest.create({
       data: {
-        ...body,
-        tenantId: 'default-tenant' // TODO: Get from session
+        name: body.name || 'Test Suite',
+        type: 'test_suite',
+        status: 'pending',
+        config: body.config || {},
+        executedBy: session.user.id,
+        success: false,
+        errors: []
       }
     });
 
@@ -104,10 +59,7 @@ export async function POST(request: NextRequest) {
       data: testSuite
     });
   } catch (error) {
-    console.error('Test suite create error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to create test suite' },
-      { status: 500 }
-    );
+    console.error('Test suite creation error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

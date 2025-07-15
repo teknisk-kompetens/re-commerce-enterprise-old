@@ -1,127 +1,65 @@
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-config';
 import { prisma } from '@/lib/db';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const environment = searchParams.get('environment');
-    const component = searchParams.get('component');
-    
-    const where: any = {
-      tenantId: 'default-tenant' // TODO: Get from session
-    };
-    
-    if (environment) where.environment = environment;
-    if (component) where.component = component;
-
-    const validations = await prisma.deploymentValidation.findMany({
-      where,
-      orderBy: { lastRun: 'desc' }
-    });
-
-    // Generate mock deployment validations if no data exists
-    if (validations.length === 0) {
-      const mockValidations = [
-        {
-          id: 'dep1',
-          environment: 'production',
-          component: 'database',
-          check: 'Connection Pool Health',
-          status: 'passed',
-          result: { connections: 45, maxConnections: 100, responseTime: '12ms' },
-          lastRun: new Date(),
-          duration: 1500,
-          isRequired: true
-        },
-        {
-          id: 'dep2',
-          environment: 'production',
-          component: 'api',
-          check: 'Load Balancer Configuration',
-          status: 'passed',
-          result: { activeNodes: 3, healthyNodes: 3, distribution: 'even' },
-          lastRun: new Date(),
-          duration: 800,
-          isRequired: true
-        },
-        {
-          id: 'dep3',
-          environment: 'production',
-          component: 'frontend',
-          check: 'CDN Configuration',
-          status: 'warning',
-          result: { cacheHitRatio: 78, expectedMinimum: 85 },
-          errorMessage: 'Cache hit ratio below optimal threshold',
-          lastRun: new Date(),
-          duration: 2100,
-          isRequired: false
-        },
-        {
-          id: 'dep4',
-          environment: 'staging',
-          component: 'infrastructure',
-          check: 'Auto-scaling Configuration',
-          status: 'passed',
-          result: { minInstances: 2, maxInstances: 10, currentInstances: 3 },
-          lastRun: new Date(),
-          duration: 1200,
-          isRequired: true
-        },
-        {
-          id: 'dep5',
-          environment: 'production',
-          component: 'security',
-          check: 'SSL Certificate Validation',
-          status: 'passed',
-          result: { validUntil: '2025-12-01', issuer: 'LetsEncrypt', strength: 'Strong' },
-          lastRun: new Date(),
-          duration: 950,
-          isRequired: true
-        }
-      ];
-
-      return NextResponse.json({
-        success: true,
-        data: mockValidations
-      });
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // Use IntegrationTest model for deployment validations
+    const deploymentValidations = await prisma.integrationTest.findMany({
+      where: {
+        type: 'deployment_validation'
+      },
+      take: 50,
+      orderBy: { executedAt: 'desc' }
+    });
 
     return NextResponse.json({
       success: true,
-      data: validations
+      data: deploymentValidations
     });
   } catch (error) {
-    console.error('Deployment validations API error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch deployment validations' },
-      { status: 500 }
-    );
+    console.error('Deployment validations error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
-    
-    const validation = await prisma.deploymentValidation.create({
+
+    // Create deployment validation as integration test
+    const deploymentValidation = await prisma.integrationTest.create({
       data: {
-        ...body,
-        tenantId: 'default-tenant' // TODO: Get from session
+        name: body.name || 'Deployment Validation',
+        type: 'deployment_validation',
+        status: 'pending',
+        config: body.config || {},
+        executedBy: session.user.id,
+        success: false,
+        errors: []
       }
     });
 
     return NextResponse.json({
       success: true,
-      data: validation
+      data: deploymentValidation
     });
   } catch (error) {
-    console.error('Deployment validation create error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to create deployment validation' },
-      { status: 500 }
-    );
+    console.error('Deployment validation creation error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

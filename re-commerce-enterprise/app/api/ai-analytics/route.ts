@@ -1,76 +1,71 @@
 
-export const dynamic = "force-dynamic";
-
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-config';
 import { prisma } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const tenantId = searchParams.get('tenantId') || 'default-tenant';
-    const type = searchParams.get('type');
-    const category = searchParams.get('category');
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const where: any = { tenantId };
-    if (type) where.type = type;
-    if (category) where.category = category;
-
-    const insights = await prisma.aiInsight.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
+    // Use AnalyticsEvent model instead of non-existent aiInsight
+    const analyticsEvents = await prisma.analyticsEvent.findMany({
+      where: {
+        tenantId: session.user.tenantId,
+        eventType: 'ai_insight'
+      },
       take: 50,
-      include: {
-        user: {
-          select: { id: true, name: true, email: true }
-        }
-      }
+      orderBy: { timestamp: 'desc' }
     });
 
-    return NextResponse.json({ insights });
+    return NextResponse.json({
+      success: true,
+      data: analyticsEvents.map(event => ({
+        id: event.id,
+        type: event.eventType,
+        timestamp: event.timestamp,
+        properties: event.properties,
+        userId: event.userId,
+        sessionId: event.sessionId
+      }))
+    });
   } catch (error) {
-    console.error('Error fetching AI insights:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch AI insights' },
-      { status: 500 }
-    );
+    console.error('AI Analytics error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { 
-      type, 
-      category, 
-      title, 
-      description, 
-      confidence, 
-      impact, 
-      data, 
-      tenantId = 'default-tenant',
-      userId 
-    } = body;
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const insight = await prisma.aiInsight.create({
+    const body = await request.json();
+
+    // Create analytics event instead of non-existent aiInsight
+    const analyticsEvent = await prisma.analyticsEvent.create({
       data: {
-        type,
-        category,
-        title,
-        description,
-        confidence,
-        impact,
-        data,
-        tenantId,
-        userId
+        eventType: 'ai_insight',
+        properties: body,
+        userId: session.user.id,
+        tenantId: session.user.tenantId,
+        sessionId: request.headers.get('x-session-id') || 'unknown'
       }
     });
 
-    return NextResponse.json({ insight });
+    return NextResponse.json({
+      success: true,
+      data: analyticsEvent
+    });
   } catch (error) {
-    console.error('Error creating AI insight:', error);
-    return NextResponse.json(
-      { error: 'Failed to create AI insight' },
-      { status: 500 }
-    );
+    console.error('AI Analytics creation error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

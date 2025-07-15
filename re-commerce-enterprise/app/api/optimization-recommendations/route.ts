@@ -1,70 +1,64 @@
 
-export const dynamic = "force-dynamic";
-
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-config';
 import { prisma } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const tenantId = searchParams.get('tenantId') || 'default-tenant';
-    const category = searchParams.get('category');
-    const status = searchParams.get('status');
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const where: any = { tenantId };
-    if (category) where.category = category;
-    if (status) where.status = status;
-
-    const recommendations = await prisma.optimizationRecommendation.findMany({
-      where,
-      orderBy: { priority: 'desc' }
+    // Use AnalyticsEvent model for optimization recommendations
+    const optimizationRecommendations = await prisma.analyticsEvent.findMany({
+      where: {
+        tenantId: session.user.tenantId,
+        eventType: 'optimization_recommendation'
+      },
+      take: 50,
+      orderBy: { timestamp: 'desc' }
     });
 
-    return NextResponse.json({ recommendations });
+    return NextResponse.json({
+      success: true,
+      data: optimizationRecommendations
+    });
   } catch (error) {
-    console.error('Error fetching optimization recommendations:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch optimization recommendations' },
-      { status: 500 }
-    );
+    console.error('Optimization recommendations error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { 
-      category, 
-      title, 
-      description, 
-      impact, 
-      effort, 
-      priority, 
-      estimatedImprovement, 
-      implementation, 
-      tenantId = 'default-tenant' 
-    } = body;
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const recommendation = await prisma.optimizationRecommendation.create({
+    const body = await request.json();
+
+    // Create optimization recommendation as analytics event
+    const optimizationRecommendation = await prisma.analyticsEvent.create({
       data: {
-        category,
-        title,
-        description,
-        impact,
-        effort,
-        priority,
-        estimatedImprovement,
-        implementation,
-        tenantId
+        eventType: 'optimization_recommendation',
+        properties: body,
+        userId: session.user.id,
+        tenantId: session.user.tenantId,
+        sessionId: request.headers.get('x-session-id') || 'unknown'
       }
     });
 
-    return NextResponse.json({ recommendation });
+    return NextResponse.json({
+      success: true,
+      data: optimizationRecommendation
+    });
   } catch (error) {
-    console.error('Error creating optimization recommendation:', error);
-    return NextResponse.json(
-      { error: 'Failed to create optimization recommendation' },
-      { status: 500 }
-    );
+    console.error('Optimization recommendation creation error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

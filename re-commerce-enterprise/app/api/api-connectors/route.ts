@@ -1,79 +1,64 @@
 
-export const dynamic = "force-dynamic";
-
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-config';
 import { prisma } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const tenantId = searchParams.get('tenantId') || 'default-tenant';
-    const type = searchParams.get('type');
-    const isActive = searchParams.get('isActive');
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const where: any = { tenantId };
-    if (type) where.type = type;
-    if (isActive !== null) where.isActive = isActive === 'true';
-
-    const connectors = await prisma.apiConnector.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        user: {
-          select: { id: true, name: true, email: true }
-        }
-      }
+    // Use APIConnector model (correct casing)
+    const apiConnectors = await prisma.aPIConnector.findMany({
+      where: {
+        status: 'active'
+      },
+      orderBy: { createdAt: 'desc' }
     });
 
-    return NextResponse.json({ connectors });
+    return NextResponse.json({
+      success: true,
+      data: apiConnectors
+    });
   } catch (error) {
-    console.error('Error fetching API connectors:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch API connectors' },
-      { status: 500 }
-    );
+    console.error('API Connectors error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { 
-      name, 
-      type, 
-      baseUrl, 
-      auth, 
-      headers, 
-      rateLimits, 
-      timeout, 
-      retryPolicy, 
-      healthCheck, 
-      tenantId = 'default-tenant',
-      createdBy 
-    } = body;
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const connector = await prisma.apiConnector.create({
+    const body = await request.json();
+
+    // Create API connector with correct model name
+    const apiConnector = await prisma.aPIConnector.create({
       data: {
-        name,
-        type,
-        baseUrl,
-        auth,
-        headers,
-        rateLimits,
-        timeout: timeout || 30000,
-        retryPolicy,
-        healthCheck,
-        tenantId,
-        createdBy
+        name: body.name,
+        type: body.type,
+        endpoint: body.endpoint,
+        config: body.config || {},
+        status: 'active',
+        enabled: true,
+        syncInterval: body.syncInterval || 300
       }
     });
 
-    return NextResponse.json({ connector });
+    return NextResponse.json({
+      success: true,
+      data: apiConnector
+    });
   } catch (error) {
-    console.error('Error creating API connector:', error);
-    return NextResponse.json(
-      { error: 'Failed to create API connector' },
-      { status: 500 }
-    );
+    console.error('API Connector creation error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

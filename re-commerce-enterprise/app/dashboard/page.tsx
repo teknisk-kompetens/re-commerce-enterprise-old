@@ -95,36 +95,6 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
-      {/* Header */}
-      <header className="border-b border-slate-200 bg-white/80 backdrop-blur-sm sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center justify-between h-16">
-            <div className="flex items-center space-x-4">
-              <div className="w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-                <span className="text-white font-bold text-sm">EP</span>
-              </div>
-              <h1 className="text-2xl font-bold text-slate-900">Enterprise Dashboard</h1>
-              <Badge className="bg-gradient-to-r from-purple-500 to-indigo-600 text-white">
-                DAY 5 COMPLETE - ENTERPRISE READY
-              </Badge>
-            </div>
-            <div className="flex items-center space-x-3">
-              <Button variant="outline" size="sm">
-                <Bell className="h-4 w-4 mr-2" />
-                Notifications
-              </Button>
-              <Button variant="outline" size="sm">
-                <Download className="h-4 w-4 mr-2" />
-                Export
-              </Button>
-              <Link href="/">
-                <Button variant="outline">Back to Home</Button>
-              </Link>
-            </div>
-          </div>
-        </div>
-      </header>
-
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Welcome Section */}
@@ -598,21 +568,13 @@ export default function DashboardPage() {
                         <div className="w-2 h-2 bg-purple-500 rounded-full mt-2" />
                         <div>
                           <p className="text-sm font-medium text-gray-900">
-                            Revenue trend analysis suggests growth opportunity
+                            Revenue prediction analysis ready
                           </p>
                           <p className="text-xs text-gray-600">
-                            Focus on Q4 marketing campaigns
+                            Q4 projections show 22% growth
                           </p>
                         </div>
                       </div>
-                    </div>
-                    <div className="mt-4 pt-4 border-t border-purple-200">
-                      <Link href="/ai-insights">
-                        <Button className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600">
-                          View Full AI Analysis
-                          <ArrowRight className="h-4 w-4 ml-2" />
-                        </Button>
-                      </Link>
                     </div>
                   </div>
                 </CardContent>

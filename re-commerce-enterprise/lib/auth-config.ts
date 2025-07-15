@@ -1,9 +1,14 @@
 
-import type { NextAuthOptions } from 'next-auth'
-import CredentialsProvider from 'next-auth/providers/credentials'
-import { PrismaAdapter } from '@next-auth/prisma-adapter'
-import { prisma } from '@/lib/db'
-import bcrypt from 'bcryptjs'
+/**
+ * Authentication Configuration
+ * NextAuth configuration for the analytics platform
+ */
+
+import { NextAuthOptions } from 'next-auth';
+import CredentialsProvider from 'next-auth/providers/credentials';
+import { PrismaAdapter } from '@next-auth/prisma-adapter';
+import { prisma } from '@/lib/db';
+import bcrypt from 'bcryptjs';
 
 export const authOptions: NextAuthOptions = {
   adapter: PrismaAdapter(prisma),
@@ -16,77 +21,64 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) {
-          return null
+          return null;
         }
 
-        // Find user by email (across all tenants)
-        const user = await prisma.user.findFirst({
-          where: {
-            email: credentials.email
-          },
-          include: {
-            tenant: true
+        try {
+          // Find user by email across all tenants (for simplicity in auth)
+          const user = await prisma.user.findFirst({
+            where: { email: credentials.email },
+            include: { tenant: true }
+          });
+
+          if (!user || !user.password) {
+            return null;
           }
-        })
 
-        if (!user || !user.password) {
-          return null
-        }
+          const passwordMatch = await bcrypt.compare(credentials.password, user.password);
 
-        // Check if user is active
-        if (!user.isActive) {
-          return null
-        }
+          if (!passwordMatch) {
+            return null;
+          }
 
-        // Verify password
-        const isPasswordValid = await bcrypt.compare(credentials.password, user.password)
-        if (!isPasswordValid) {
-          return null
-        }
-
-        // Update last login
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { lastLogin: new Date() }
-        })
-
-        return {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          tenantId: user.tenantId,
-          tenant: user.tenant
+          return {
+            id: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role || 'user',
+            tenantId: user.tenantId,
+            tenant: user.tenant
+          };
+        } catch (error) {
+          console.error('Auth error:', error);
+          return null;
         }
       }
     })
   ],
   session: {
-    strategy: 'jwt',
-    maxAge: 30 * 24 * 60 * 60, // 30 days
+    strategy: 'jwt'
+  },
+  pages: {
+    signIn: '/auth/signin'
   },
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
-        token.role = user.role
-        token.tenantId = user.tenantId
-        token.tenant = user.tenant
+        token.role = user.role;
+        token.tenantId = user.tenantId;
+        token.tenant = user.tenant;
       }
-      return token
+      return token;
     },
     async session({ session, token }) {
       if (token) {
-        session.user.id = token.sub as string
-        session.user.role = token.role as string
-        session.user.tenantId = token.tenantId as string
-        session.user.tenant = token.tenant as any
+        session.user.id = token.sub!;
+        session.user.role = token.role as string;
+        session.user.tenantId = token.tenantId as string;
+        session.user.tenant = token.tenant as any;
       }
-      return session
+      return session;
     }
-  },
-  pages: {
-    signIn: '/auth/signin',
-    error: '/auth/error'
-  },
-  secret: process.env.NEXTAUTH_SECRET
-}
+  }
+};

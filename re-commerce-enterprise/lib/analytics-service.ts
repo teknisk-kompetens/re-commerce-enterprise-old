@@ -63,22 +63,23 @@ export class AnalyticsService {
       const thirtyDaysAgo = new Date()
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
       
-      const userActivityTrend = await prisma.analytics.groupBy({
+      const userActivityTrend = await prisma.analyticsEvent.groupBy({
         by: ['timestamp'],
         where: {
           tenantId,
-          metric: 'user_activity',
+          eventType: 'user_activity',
           timestamp: { gte: thirtyDaysAgo }
         },
-        _sum: { value: true }
+        _count: { id: true }
       })
 
       // Get task completion trend (last 30 days)
-      const taskCompletionData = await prisma.task.groupBy({
-        by: ['createdAt'],
+      const taskCompletionData = await prisma.analyticsEvent.groupBy({
+        by: ['timestamp'],
         where: {
           tenantId,
-          createdAt: { gte: thirtyDaysAgo }
+          eventType: 'task_completion',
+          timestamp: { gte: thirtyDaysAgo }
         },
         _count: { id: true }
       })
@@ -90,7 +91,7 @@ export class AnalyticsService {
           tasks: {
             select: {
               id: true,
-              completed: true
+              completedAt: true
             }
           }
         }
@@ -112,8 +113,8 @@ export class AnalyticsService {
       const topPerformers = await prisma.user.findMany({
         where: { tenantId },
         include: {
-          tasks: {
-            where: { completed: true },
+          assignedTasks: {
+            where: { completedAt: { not: null } },
             select: { id: true }
           }
         },

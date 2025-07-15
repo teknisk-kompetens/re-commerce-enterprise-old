@@ -1,138 +1,123 @@
 
-import { prisma } from './db'
+/**
+ * AUDIT LOGGER
+ * Enterprise-grade audit logging for security and compliance
+ */
 
-export interface AuditLogEntry {
-  action: string
-  resource: string
-  resourceId?: string
-  details?: any
-  ipAddress?: string
-  userAgent?: string
-  tenantId: string
-  userId?: string
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/lib/db';
+
+export interface AuditEvent {
+  action: string;
+  resource: string;
+  resourceId?: string;
+  userId?: string;
+  tenantId?: string;
+  ipAddress?: string;
+  userAgent?: string;
+  details?: any;
+  timestamp: Date;
 }
 
 export class AuditLogger {
   /**
-   * Log an audit event
+   * Log an error event
    */
-  static async log(entry: AuditLogEntry): Promise<void> {
+  async logError(requestId: string, error: any, request: NextRequest): Promise<void> {
+    try {
+      const auditEvent: AuditEvent = {
+        action: 'ERROR',
+        resource: 'system',
+        details: {
+          requestId,
+          error: error instanceof Error ? error.message : String(error),
+          stack: error instanceof Error ? error.stack : undefined,
+          url: request.url,
+          method: request.method,
+        },
+        ipAddress: request.ip || request.headers.get('x-forwarded-for') || 'unknown',
+        userAgent: request.headers.get('user-agent') || 'unknown',
+        timestamp: new Date(),
+      };
+
+      await this.logEvent(auditEvent);
+    } catch (logError) {
+      console.error('Failed to log error event:', logError);
+    }
+  }
+
+  /**
+   * Log a request event
+   */
+  async logRequest(
+    context: any,
+    response: NextResponse,
+    metrics: any
+  ): Promise<void> {
+    try {
+      const auditEvent: AuditEvent = {
+        action: 'REQUEST',
+        resource: 'api',
+        resourceId: context.request?.id,
+        userId: context.user?.id,
+        tenantId: context.tenant?.id,
+        ipAddress: context.request?.clientInfo?.ip,
+        userAgent: context.request?.clientInfo?.userAgent,
+        details: {
+          method: context.request?.method,
+          url: context.request?.url,
+          statusCode: response.status,
+          processingTime: metrics.processingTime,
+          traceId: context.tracing?.traceId,
+        },
+        timestamp: new Date(),
+      };
+
+      await this.logEvent(auditEvent);
+    } catch (error) {
+      console.error('Failed to log request event:', error);
+    }
+  }
+
+  /**
+   * Static log method for backwards compatibility
+   */
+  static async log(event: Partial<AuditEvent>): Promise<void> {
+    const logger = new AuditLogger();
+    const fullEvent: AuditEvent = {
+      action: event.action || 'UNKNOWN',
+      resource: event.resource || 'system',
+      resourceId: event.resourceId,
+      userId: event.userId,
+      tenantId: event.tenantId,
+      ipAddress: event.ipAddress,
+      userAgent: event.userAgent,
+      details: event.details,
+      timestamp: event.timestamp || new Date(),
+    };
+    await logger.logEvent(fullEvent);
+  }
+
+  /**
+   * Log a general audit event
+   */
+  private async logEvent(event: AuditEvent): Promise<void> {
     try {
       await prisma.auditLog.create({
         data: {
-          action: entry.action,
-          resource: entry.resource,
-          resourceId: entry.resourceId,
-          details: entry.details,
-          ipAddress: entry.ipAddress,
-          userAgent: entry.userAgent,
-          tenantId: entry.tenantId,
-          userId: entry.userId,
-          timestamp: new Date()
-        }
-      })
+          action: event.action,
+          resource: event.resource,
+          details: event.details || {},
+          ipAddress: event.ipAddress,
+          userAgent: event.userAgent,
+          timestamp: event.timestamp,
+          userId: event.userId,
+        },
+      });
     } catch (error) {
-      console.error('Failed to log audit event:', error)
+      console.error('Failed to persist audit log:', error);
+      // Fallback to console logging
+      console.log('AUDIT LOG:', JSON.stringify(event, null, 2));
     }
-  }
-
-  /**
-   * Get audit logs for a tenant
-   */
-  static async getLogs(tenantId: string, options: {
-    limit?: number
-    offset?: number
-    action?: string
-    resource?: string
-    userId?: string
-    startDate?: Date
-    endDate?: Date
-  } = {}): Promise<any[]> {
-    const {
-      limit = 50,
-      offset = 0,
-      action,
-      resource,
-      userId,
-      startDate,
-      endDate
-    } = options
-
-    const where: any = { tenantId }
-
-    if (action) where.action = action
-    if (resource) where.resource = resource
-    if (userId) where.userId = userId
-    if (startDate || endDate) {
-      where.timestamp = {}
-      if (startDate) where.timestamp.gte = startDate
-      if (endDate) where.timestamp.lte = endDate
-    }
-
-    return await prisma.auditLog.findMany({
-      where,
-      include: {
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }
-      },
-      orderBy: {
-        timestamp: 'desc'
-      },
-      take: limit,
-      skip: offset
-    })
-  }
-
-  /**
-   * Get audit log statistics
-   */
-  static async getStats(tenantId: string, days = 30): Promise<{
-    totalEvents: number
-    eventsByAction: Record<string, number>
-    eventsByResource: Record<string, number>
-    eventsByDay: Record<string, number>
-  }> {
-    const startDate = new Date()
-    startDate.setDate(startDate.getDate() - days)
-
-    const logs = await prisma.auditLog.findMany({
-      where: {
-        tenantId,
-        timestamp: {
-          gte: startDate
-        }
-      },
-      select: {
-        action: true,
-        resource: true,
-        timestamp: true
-      }
-    })
-
-    const stats = {
-      totalEvents: logs.length,
-      eventsByAction: {} as Record<string, number>,
-      eventsByResource: {} as Record<string, number>,
-      eventsByDay: {} as Record<string, number>
-    }
-
-    logs.forEach((log: any) => {
-      // Count by action
-      stats.eventsByAction[log.action] = (stats.eventsByAction[log.action] || 0) + 1
-
-      // Count by resource
-      stats.eventsByResource[log.resource] = (stats.eventsByResource[log.resource] || 0) + 1
-
-      // Count by day
-      const day = log.timestamp.toISOString().split('T')[0]
-      stats.eventsByDay[day] = (stats.eventsByDay[day] || 0) + 1
-    })
-
-    return stats
   }
 }

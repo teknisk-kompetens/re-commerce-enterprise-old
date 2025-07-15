@@ -1,202 +1,73 @@
 
-import { NextRequest, NextResponse } from 'next/server'
-import { RateLimiter } from './rate-limiter'
-import { prisma } from './db'
+/**
+ * SECURITY MIDDLEWARE
+ * Enterprise-grade security validation and request processing
+ */
+
+import { NextRequest } from 'next/server';
+
+export interface SecurityValidationResult {
+  allowed: boolean;
+  reason: string;
+  riskScore: number;
+  mitigationActions: string[];
+}
 
 export class SecurityMiddleware {
-  /**
-   * Rate limiting middleware
-   */
-  static async rateLimit(request: NextRequest, options: {
-    windowMs: number
-    max: number
-    skipSuccessfulRequests?: boolean
-  }): Promise<NextResponse | null> {
-    const ip = request.ip || request.headers.get('x-forwarded-for') || 'unknown'
-    const tenantId = request.headers.get('x-tenant-id') || undefined
-    const pathname = request.nextUrl.pathname
-
-    const result = await RateLimiter.isAllowed({
-      identifier: ip,
-      type: 'ip',
-      endpoint: pathname,
-      tenantId,
-      windowMs: options.windowMs,
-      max: options.max
-    })
-
-    if (!result.allowed) {
-      return NextResponse.json(
-        { error: 'Rate limit exceeded', resetTime: result.resetTime },
-        { 
-          status: 429,
-          headers: {
-            'X-RateLimit-Limit': options.max.toString(),
-            'X-RateLimit-Remaining': result.remaining.toString(),
-            'X-RateLimit-Reset': result.resetTime.toISOString(),
-            'Retry-After': Math.ceil((result.resetTime.getTime() - Date.now()) / 1000).toString()
-          }
-        }
-      )
-    }
-
-    return null
-  }
-
-  /**
-   * CSRF protection middleware
-   */
-  static async csrfProtection(request: NextRequest): Promise<NextResponse | null> {
-    const method = request.method
-    const origin = request.headers.get('origin')
-    const referer = request.headers.get('referer')
-
-    // Skip CSRF for GET, HEAD, OPTIONS
-    if (['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-      return null
-    }
-
-    // Check origin header
-    if (!origin) {
-      return NextResponse.json(
-        { error: 'Missing origin header' },
-        { status: 403 }
-      )
-    }
-
-    // Validate origin against allowed origins
-    const allowedOrigins = [
-      process.env.NEXTAUTH_URL,
-      process.env.NEXT_PUBLIC_APP_URL,
-      'http://localhost:3000',
-      'https://localhost:3000'
-    ].filter(Boolean)
-
-    const isValidOrigin = allowedOrigins.some(allowedOrigin => 
-      origin.startsWith(allowedOrigin as string)
-    )
-
-    if (!isValidOrigin) {
-      return NextResponse.json(
-        { error: 'Invalid origin' },
-        { status: 403 }
-      )
-    }
-
-    return null
-  }
-
-  /**
-   * Input validation middleware
-   */
-  static validateInput(data: any, schema: any): { isValid: boolean; errors: string[] } {
-    const errors: string[] = []
-
-    // Basic validation rules
-    if (schema.required) {
-      schema.required.forEach((field: string) => {
-        if (!data[field]) {
-          errors.push(`${field} is required`)
-        }
-      })
-    }
-
-    if (schema.email) {
-      schema.email.forEach((field: string) => {
-        if (data[field] && !this.isValidEmail(data[field])) {
-          errors.push(`${field} must be a valid email`)
-        }
-      })
-    }
-
-    if (schema.minLength) {
-      Object.entries(schema.minLength).forEach(([field, minLength]) => {
-        if (data[field] && data[field].length < (minLength as number)) {
-          errors.push(`${field} must be at least ${minLength} characters`)
-        }
-      })
-    }
-
-    if (schema.maxLength) {
-      Object.entries(schema.maxLength).forEach(([field, maxLength]) => {
-        if (data[field] && data[field].length > (maxLength as number)) {
-          errors.push(`${field} must be at most ${maxLength} characters`)
-        }
-      })
-    }
-
-    return {
-      isValid: errors.length === 0,
-      errors
-    }
-  }
-
-  /**
-   * Sanitize input data
-   */
-  static sanitizeInput(data: any): any {
-    if (typeof data === 'string') {
-      return data
-        .replace(/[<>]/g, '') // Remove potential HTML tags
-        .replace(/javascript:/gi, '') // Remove javascript: protocol
-        .replace(/on\w+=/gi, '') // Remove event handlers
-        .trim()
-    }
-
-    if (Array.isArray(data)) {
-      return data.map(item => this.sanitizeInput(item))
-    }
-
-    if (typeof data === 'object' && data !== null) {
-      const sanitized: any = {}
-      for (const [key, value] of Object.entries(data)) {
-        sanitized[key] = this.sanitizeInput(value)
-      }
-      return sanitized
-    }
-
-    return data
-  }
-
-  /**
-   * Log security event
-   */
-  static async logSecurityEvent(event: {
-    type: 'RATE_LIMIT' | 'CSRF' | 'INVALID_INPUT' | 'UNAUTHORIZED' | 'SUSPICIOUS_ACTIVITY'
-    severity: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
-    message: string
-    details?: any
-    ipAddress?: string
-    userAgent?: string
-    tenantId?: string
-    userId?: string
-  }): Promise<void> {
+  static async validateRequest(request: NextRequest): Promise<SecurityValidationResult> {
     try {
-      await prisma.systemEvent.create({
-        data: {
-          type: 'SECURITY',
-          severity: event.severity,
-          message: `${event.type}: ${event.message}`,
-          details: {
-            eventType: event.type,
-            ipAddress: event.ipAddress,
-            userAgent: event.userAgent,
-            userId: event.userId,
-            ...event.details
-          },
-          tenantId: event.tenantId
-        }
-      })
+      // Basic security validation
+      const userAgent = request.headers.get('user-agent') || '';
+      const ip = request.ip || request.headers.get('x-forwarded-for') || 'unknown';
+      
+      let riskScore = 0;
+      const mitigationActions: string[] = [];
+      
+      // Check for suspicious user agent patterns
+      const suspiciousPatterns = [
+        /bot/i,
+        /crawler/i,
+        /scanner/i,
+        /sqlmap/i,
+        /nikto/i,
+      ];
+      
+      if (suspiciousPatterns.some(pattern => pattern.test(userAgent))) {
+        riskScore += 30;
+        mitigationActions.push('suspicious_user_agent_detected');
+      }
+      
+      // Check for empty or suspicious user agent
+      if (!userAgent || userAgent.length < 10) {
+        riskScore += 20;
+        mitigationActions.push('minimal_user_agent');
+      }
+      
+      // Check IP address patterns
+      if (ip === 'unknown' || ip.startsWith('0.')) {
+        riskScore += 15;
+        mitigationActions.push('suspicious_ip_address');
+      }
+      
+      // Additional checks can be added here
+      
+      const allowed = riskScore < 50; // Block if risk score is too high
+      const reason = allowed ? 'Request validated successfully' : 'High risk request blocked';
+      
+      return {
+        allowed,
+        reason,
+        riskScore,
+        mitigationActions,
+      };
     } catch (error) {
-      console.error('Failed to log security event:', error)
+      console.error('Security validation error:', error);
+      return {
+        allowed: false,
+        reason: 'Security validation failed',
+        riskScore: 100,
+        mitigationActions: ['validation_error'],
+      };
     }
-  }
-
-  /**
-   * Validate email format
-   */
-  private static isValidEmail(email: string): boolean {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    return emailRegex.test(email)
   }
 }

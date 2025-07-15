@@ -1,5 +1,5 @@
 
-import { PrismaClient } from '../../node_modules/.prisma/client'
+import { PrismaClient } from '@prisma/client'
 import { RBACService } from '../lib/rbac-service'
 import { EnterpriseConfig } from '../lib/enterprise-config'
 import { FeatureFlagService } from '../lib/feature-flag-service'

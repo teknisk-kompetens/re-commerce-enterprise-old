@@ -1,73 +1,65 @@
 
-export const dynamic = "force-dynamic";
-
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-config';
 import { prisma } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const tenantId = searchParams.get('tenantId') || 'default-tenant';
-    const metric = searchParams.get('metric');
-    const source = searchParams.get('source');
-    const hours = parseInt(searchParams.get('hours') || '24');
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const where: any = { tenantId };
-    if (metric) where.metric = metric;
-    if (source) where.source = source;
-
-    // Filter by time range
-    const timeFilter = new Date();
-    timeFilter.setHours(timeFilter.getHours() - hours);
-    where.timestamp = { gte: timeFilter };
-
-    const metrics = await prisma.performanceMetric.findMany({
-      where,
-      orderBy: { timestamp: 'desc' },
-      take: 1000
+    // Use MetricSnapshot model for performance metrics
+    const performanceMetrics = await prisma.metricSnapshot.findMany({
+      where: {
+        category: 'performance'
+      },
+      take: 50,
+      orderBy: { timestamp: 'desc' }
     });
 
-    return NextResponse.json({ metrics });
+    return NextResponse.json({
+      success: true,
+      data: performanceMetrics
+    });
   } catch (error) {
-    console.error('Error fetching performance metrics:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch performance metrics' },
-      { status: 500 }
-    );
+    console.error('Performance metrics error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { 
-      metric, 
-      value, 
-      unit, 
-      source, 
-      endpoint, 
-      metadata, 
-      tenantId = 'default-tenant' 
-    } = body;
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const performanceMetric = await prisma.performanceMetric.create({
+    const body = await request.json();
+
+    // Create performance metric as metric snapshot
+    const performanceMetric = await prisma.metricSnapshot.create({
       data: {
-        metric,
-        value,
-        unit,
-        source,
-        endpoint,
-        metadata,
-        tenantId
+        category: 'performance',
+        metrics: body.metrics || {},
+        metadata: {
+          createdBy: session.user.id,
+          source: 'performance_monitor',
+          ...body.metadata
+        }
       }
     });
 
-    return NextResponse.json({ performanceMetric });
+    return NextResponse.json({
+      success: true,
+      data: performanceMetric
+    });
   } catch (error) {
-    console.error('Error creating performance metric:', error);
-    return NextResponse.json(
-      { error: 'Failed to create performance metric' },
-      { status: 500 }
-    );
+    console.error('Performance metric creation error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

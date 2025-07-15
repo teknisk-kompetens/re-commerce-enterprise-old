@@ -1,83 +1,65 @@
 
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-config';
 import { prisma } from '@/lib/db';
 
-export const dynamic = "force-dynamic";
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const category = searchParams.get('category');
-    const status = searchParams.get('status');
-    
-    const where: any = {
-      tenantId: 'default-tenant' // TODO: Get from session
-    };
-    
-    if (category) where.category = category;
-    if (status) where.status = status;
-
-    const metrics = await prisma.systemHealthMetric.findMany({
-      where,
-      orderBy: { timestamp: 'desc' },
-      take: 100
-    });
-
-    // Generate mock real-time data if no data exists
-    if (metrics.length === 0) {
-      const mockMetrics = [
-        { category: 'system', metric: 'cpu_usage', value: 65.2, status: 'healthy', unit: '%' },
-        { category: 'system', metric: 'memory_usage', value: 78.5, status: 'warning', unit: '%' },
-        { category: 'database', metric: 'response_time', value: 45.3, status: 'healthy', unit: 'ms' },
-        { category: 'api', metric: 'error_rate', value: 0.02, status: 'healthy', unit: '%' },
-        { category: 'integration', metric: 'uptime', value: 99.9, status: 'healthy', unit: '%' },
-        { category: 'security', metric: 'threat_level', value: 2.1, status: 'healthy', unit: 'score' }
-      ];
-
-      return NextResponse.json({
-        success: true,
-        data: mockMetrics.map(m => ({
-          ...m,
-          id: Math.random().toString(36).substr(2, 9),
-          timestamp: new Date().toISOString(),
-          threshold: m.metric === 'cpu_usage' ? 80 : m.metric === 'memory_usage' ? 85 : null
-        }))
-      });
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
+
+    // Use MetricSnapshot model for system health metrics
+    const systemHealthMetrics = await prisma.metricSnapshot.findMany({
+      where: {
+        category: 'system_health'
+      },
+      take: 50,
+      orderBy: { timestamp: 'desc' }
+    });
 
     return NextResponse.json({
       success: true,
-      data: metrics
+      data: systemHealthMetrics
     });
   } catch (error) {
-    console.error('System health API error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to fetch system health metrics' },
-      { status: 500 }
-    );
+    console.error('System health error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
-    
-    const metric = await prisma.systemHealthMetric.create({
+
+    // Create system health metric as metric snapshot
+    const systemHealthMetric = await prisma.metricSnapshot.create({
       data: {
-        ...body,
-        tenantId: 'default-tenant' // TODO: Get from session
+        category: 'system_health',
+        metrics: body.metrics || {},
+        metadata: {
+          createdBy: session.user.id,
+          source: 'system_health_monitor',
+          ...body.metadata
+        }
       }
     });
 
     return NextResponse.json({
       success: true,
-      data: metric
+      data: systemHealthMetric
     });
   } catch (error) {
-    console.error('System health create error:', error);
-    return NextResponse.json(
-      { success: false, error: 'Failed to create health metric' },
-      { status: 500 }
-    );
+    console.error('System health metric creation error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

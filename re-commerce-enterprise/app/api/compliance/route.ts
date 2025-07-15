@@ -1,68 +1,59 @@
 
-export const dynamic = "force-dynamic";
-
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-config';
 import { prisma } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const tenantId = searchParams.get('tenantId') || 'default-tenant';
-    const framework = searchParams.get('framework');
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const where: any = { tenantId };
-    if (framework) where.framework = framework;
-
-    const records = await prisma.complianceRecord.findMany({
-      where,
-      orderBy: { lastCheck: 'desc' }
+    // Use ComplianceAudit model instead of non-existent complianceRecord
+    const complianceAudits = await prisma.complianceAudit.findMany({
+      take: 50,
+      orderBy: { timestamp: 'desc' }
     });
 
-    return NextResponse.json({ records });
+    return NextResponse.json({
+      success: true,
+      data: complianceAudits
+    });
   } catch (error) {
-    console.error('Error fetching compliance records:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch compliance records' },
-      { status: 500 }
-    );
+    console.error('Compliance error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
-    const { 
-      framework, 
-      requirement, 
-      status, 
-      evidence, 
-      assignedTo, 
-      notes, 
-      tenantId = 'default-tenant' 
-    } = body;
 
-    const nextCheck = new Date();
-    nextCheck.setMonth(nextCheck.getMonth() + 3); // Check again in 3 months
-
-    const record = await prisma.complianceRecord.create({
+    // Create compliance audit
+    const complianceAudit = await prisma.complianceAudit.create({
       data: {
-        framework,
-        requirement,
-        status,
-        evidence,
-        assignedTo,
-        notes,
-        tenantId,
-        nextCheck
+        standardId: body.standardId,
+        requirementId: body.requirementId,
+        assessorId: session.user.id,
+        assessment: body.assessment || {}
       }
     });
 
-    return NextResponse.json({ record });
+    return NextResponse.json({
+      success: true,
+      data: complianceAudit
+    });
   } catch (error) {
-    console.error('Error creating compliance record:', error);
-    return NextResponse.json(
-      { error: 'Failed to create compliance record' },
-      { status: 500 }
-    );
+    console.error('Compliance creation error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

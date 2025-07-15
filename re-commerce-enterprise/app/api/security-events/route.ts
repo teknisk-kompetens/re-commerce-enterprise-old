@@ -1,74 +1,69 @@
 
-export const dynamic = "force-dynamic";
-
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-config';
 import { prisma } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const tenantId = searchParams.get('tenantId') || 'default-tenant';
-    const severity = searchParams.get('severity');
-    const status = searchParams.get('status');
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const where: any = { tenantId };
-    if (severity) where.severity = severity;
-    if (status) where.status = status;
-
-    const events = await prisma.securityEvent.findMany({
-      where,
-      orderBy: { timestamp: 'desc' },
-      take: 100,
-      include: {
-        user: {
-          select: { id: true, name: true, email: true }
-        }
-      }
+    // Use SecurityEvent model
+    const securityEvents = await prisma.securityEvent.findMany({
+      take: 50,
+      orderBy: { timestamp: 'desc' }
     });
 
-    return NextResponse.json({ events });
+    return NextResponse.json({
+      success: true,
+      data: securityEvents
+    });
   } catch (error) {
-    console.error('Error fetching security events:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch security events' },
-      { status: 500 }
-    );
+    console.error('Security events error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { 
-      type, 
-      severity, 
-      source, 
-      title, 
-      description, 
-      metadata, 
-      tenantId = 'default-tenant',
-      userId 
-    } = body;
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const event = await prisma.securityEvent.create({
+    const body = await request.json();
+
+    // Create security event
+    const securityEvent = await prisma.securityEvent.create({
       data: {
-        type,
-        severity,
-        source,
-        title,
-        description,
-        metadata,
-        tenantId,
-        userId
+        source: body.source || 'system',
+        type: body.type || 'unknown',
+        category: body.category || 'security',
+        severity: body.severity || 'medium',
+        description: body.description || 'Security event detected',
+        actor: body.actor || session.user.id,
+        target: body.target || 'system',
+        outcome: body.outcome || 'unknown',
+        ipAddress: body.ipAddress || 'unknown',
+        userAgent: body.userAgent || 'unknown',
+        location: body.location,
+        metadata: body.metadata || {},
+        correlated: false,
+        investigationStatus: 'none'
       }
     });
 
-    return NextResponse.json({ event });
+    return NextResponse.json({
+      success: true,
+      data: securityEvent
+    });
   } catch (error) {
-    console.error('Error creating security event:', error);
-    return NextResponse.json(
-      { error: 'Failed to create security event' },
-      { status: 500 }
-    );
+    console.error('Security event creation error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

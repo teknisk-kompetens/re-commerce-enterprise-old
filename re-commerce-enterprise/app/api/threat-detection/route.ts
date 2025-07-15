@@ -1,67 +1,63 @@
 
-export const dynamic = "force-dynamic";
-
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-config';
 import { prisma } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const tenantId = searchParams.get('tenantId') || 'default-tenant';
-    const severity = searchParams.get('severity');
-    const status = searchParams.get('status');
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const where: any = { tenantId };
-    if (severity) where.severity = severity;
-    if (status) where.status = status;
-
-    const threats = await prisma.threatDetection.findMany({
-      where,
-      orderBy: { firstSeen: 'desc' },
-      take: 50
+    // Use ThreatEvent model for threat detection
+    const threatDetections = await prisma.threatEvent.findMany({
+      take: 50,
+      orderBy: { timestamp: 'desc' }
     });
 
-    return NextResponse.json({ threats });
+    return NextResponse.json({
+      success: true,
+      data: threatDetections
+    });
   } catch (error) {
-    console.error('Error fetching threat detections:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch threat detections' },
-      { status: 500 }
-    );
+    console.error('Threat detection error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { 
-      type, 
-      severity, 
-      source, 
-      sourceValue, 
-      confidence, 
-      details, 
-      tenantId = 'default-tenant' 
-    } = body;
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const threat = await prisma.threatDetection.create({
+    const body = await request.json();
+
+    // Create threat detection as threat event
+    const threatDetection = await prisma.threatEvent.create({
       data: {
-        type,
-        severity,
-        source,
-        sourceValue,
-        confidence,
-        details,
-        tenantId
+        eventId: crypto.randomUUID(),
+        type: body.type || 'unknown',
+        severity: body.severity || 'medium',
+        source: body.source || 'system',
+        destination: body.destination || 'unknown',
+        description: body.description || 'Threat detected',
+        mitigation: body.mitigation || 'none',
+        status: 'active'
       }
     });
 
-    return NextResponse.json({ threat });
+    return NextResponse.json({
+      success: true,
+      data: threatDetection
+    });
   } catch (error) {
-    console.error('Error creating threat detection:', error);
-    return NextResponse.json(
-      { error: 'Failed to create threat detection' },
-      { status: 500 }
-    );
+    console.error('Threat detection creation error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }

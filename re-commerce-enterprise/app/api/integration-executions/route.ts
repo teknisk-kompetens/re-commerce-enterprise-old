@@ -1,74 +1,65 @@
 
-export const dynamic = "force-dynamic";
-
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/lib/auth-config';
 import { prisma } from '@/lib/db';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const searchParams = request.nextUrl.searchParams;
-    const tenantId = searchParams.get('tenantId') || 'default-tenant';
-    const integrationId = searchParams.get('integrationId');
-    const status = searchParams.get('status');
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const where: any = { tenantId };
-    if (integrationId) where.integrationId = integrationId;
-    if (status) where.status = status;
-
-    const executions = await prisma.integrationExecution.findMany({
-      where,
-      orderBy: { startTime: 'desc' },
-      take: 100,
-      include: {
-        integration: {
-          select: { id: true, name: true, provider: true }
-        }
-      }
+    // Use IntegrationTest model for integration executions
+    const integrationExecutions = await prisma.integrationTest.findMany({
+      where: {
+        type: 'integration_execution'
+      },
+      take: 50,
+      orderBy: { executedAt: 'desc' }
     });
 
-    return NextResponse.json({ executions });
+    return NextResponse.json({
+      success: true,
+      data: integrationExecutions
+    });
   } catch (error) {
-    console.error('Error fetching integration executions:', error);
-    return NextResponse.json(
-      { error: 'Failed to fetch integration executions' },
-      { status: 500 }
-    );
+    console.error('Integration executions error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json();
-    const { 
-      integrationId, 
-      status, 
-      duration, 
-      recordsProcessed, 
-      errorMessage, 
-      logs, 
-      metadata, 
-      tenantId = 'default-tenant' 
-    } = body;
+    const session = await getServerSession(authOptions);
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
-    const execution = await prisma.integrationExecution.create({
+    const body = await request.json();
+
+    // Create integration execution as integration test
+    const integrationExecution = await prisma.integrationTest.create({
       data: {
-        integrationId,
-        status,
-        duration,
-        recordsProcessed,
-        errorMessage,
-        logs: logs || [],
-        metadata,
-        tenantId
+        name: body.name || 'Integration Execution',
+        type: 'integration_execution',
+        status: 'pending',
+        config: body.config || {},
+        executedBy: session.user.id,
+        success: false,
+        errors: []
       }
     });
 
-    return NextResponse.json({ execution });
+    return NextResponse.json({
+      success: true,
+      data: integrationExecution
+    });
   } catch (error) {
-    console.error('Error creating integration execution:', error);
-    return NextResponse.json(
-      { error: 'Failed to create integration execution' },
-      { status: 500 }
-    );
+    console.error('Integration execution creation error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
